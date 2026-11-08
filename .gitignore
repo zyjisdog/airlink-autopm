@@ -1,0 +1,10 @@
+# credentials and machine-specific data
+config.json
+autopm.log
+
+# vendor key extracted from your own APK copy
+privkey.hex
+*.apk
+
+__pycache__/
+*.pyc

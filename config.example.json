@@ -1,0 +1,21 @@
+{
+  "phone": "",
+  "bohu_uid": "",
+  "bohu_device_id": "",
+  "purifier_mac": "",
+  "auth_code": "",
+  "company_code": "",
+  "device_type": "",
+  "token": "",
+  "access_token": "",
+  "refresh_token": "",
+  "expires_at": "",
+  "interval_s": 60,
+  "min_hold_s": 300,
+  "thresholds": {
+    "up_4": 100,
+    "up_max": 150,
+    "down_4": 125,
+    "down_2": 80
+  }
+}
