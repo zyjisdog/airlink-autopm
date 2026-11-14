@@ -36,6 +36,8 @@ DOWN2 = T.get("down_2", 80)     # < 80   -> leave gear 4 for 2
 INTERVAL = CFG.get("interval_s", 60)
 MIN_HOLD = CFG.get("min_hold_s", 900)  # purifier sensor drops as fan speed rises -> short holds flap
 GIVE_UP = CFG.get("give_up_s", 1800)   # purifier room clean while monitor stays high -> rooms are not connected
+NEAR_ZERO = CFG.get("near_zero", 20)   # local room this clean -> nothing left to clean here
+FAST_GIVE_UP = CFG.get("fast_give_up_s", 300)  # ... so 5 min of observation is enough
 G2, G4, GMAX = 1, 3, 5          # 0-based indices into GEARS -> values 2/4/6
 MODE_MANUAL = 2                 # MODES[] index
 
@@ -123,6 +125,7 @@ class Runner:
         self.fail_count = 0
         self.remote_helpable = True   # is the monitor's demand worth following (rooms connected?)
         self.isolated_since = None    # when the "two rooms are separate" observation started
+        self.just_gave_up = False     # gave up on the remote room this cycle
 
     def ensure(self):
         if self.cli is None:
@@ -144,13 +147,17 @@ class Runner:
             self.remote_helpable = True
             self.isolated_since = None
         elif pm_dev < DOWN2 and pm_bohu >= UP4:
+            # near-zero local reading means high gear has nothing left to do here,
+            # so waiting the full 30 min would only waste power and make noise
+            limit = FAST_GIVE_UP if pm_dev < NEAR_ZERO else GIVE_UP
             if self.isolated_since is None:
                 self.isolated_since = now
-            elif self.remote_helpable and now - self.isolated_since > GIVE_UP:
+            elif self.remote_helpable and now - self.isolated_since > limit:
                 self.remote_helpable = False
+                self.just_gave_up = True   # settle straight to the local reading this cycle
                 log.warning("monitor %.0f high while purifier room is %.0f for %d min: "
                             "rooms not connected, stop following the monitor",
-                            pm_bohu, pm_dev, GIVE_UP // 60)
+                            pm_bohu, pm_dev, limit // 60)
         else:
             self.isolated_since = None
 
@@ -168,7 +175,8 @@ class Runner:
                 target = 1
             elif cur == 1 and eff < DOWN2:
                 target = 0
-            if target < cur and now - self.level_since < MIN_HOLD:
+            # ... except on the cycle we just gave up: the local reading decides then
+            if target < cur and not self.just_gave_up and now - self.level_since < MIN_HOLD:
                 target = cur
         if target != cur:
             names = ("gear2", "gear4", "gear6")
@@ -181,6 +189,7 @@ class Runner:
             self.cli.query_state()
             self.level = target
             self.level_since = now
+        self.just_gave_up = False
 
     def run(self):
         log.info("autopm start: >=%s->g4 >%s->g6 <%s->g4 <%s->g2 hold=%ss interval=%ss",

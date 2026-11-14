@@ -18,5 +18,7 @@
     "down_4": 125,
     "down_2": 80
   },
-  "give_up_s": 1800
+  "give_up_s": 1800,
+  "near_zero": 20,
+  "fast_give_up_s": 300
 }
