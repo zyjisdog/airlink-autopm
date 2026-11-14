@@ -35,6 +35,7 @@ DOWN4 = T.get("down_4", 125)    # < 125  -> leave gear 6 for 4
 DOWN2 = T.get("down_2", 80)     # < 80   -> leave gear 4 for 2
 INTERVAL = CFG.get("interval_s", 60)
 MIN_HOLD = CFG.get("min_hold_s", 900)  # purifier sensor drops as fan speed rises -> short holds flap
+GIVE_UP = CFG.get("give_up_s", 1800)   # purifier room clean while monitor stays high -> rooms are not connected
 G2, G4, GMAX = 1, 3, 5          # 0-based indices into GEARS -> values 2/4/6
 MODE_MANUAL = 2                 # MODES[] index
 
@@ -120,6 +121,8 @@ class Runner:
         self.level = None   # 0=gear2, 1=gear4, 2=gear6; None until synced
         self.level_since = 0.0
         self.fail_count = 0
+        self.remote_helpable = True   # is the monitor's demand worth following (rooms connected?)
+        self.isolated_since = None    # when the "two rooms are separate" observation started
 
     def ensure(self):
         if self.cli is None:
@@ -127,15 +130,34 @@ class Runner:
             threading.Thread(target=self.cli.recv_loop, daemon=True).start()
             self.cli.got_state.wait(10)
 
-    def control(self, pm_bohu, pm_dev):
+    def control(self, pm_bohu, pm_dev, now=None):
+        now = time.time() if now is None else now
         d = self.cli.dev
         if self.level is None:
             self.level = {2: 0, 4: 1, 6: 2}.get(d.gear, 0)
-            self.level_since = time.time()
+            self.level_since = now
         cur = self.level
+        # The purifier only cleans its own room. If its room is clean while the
+        # monitor keeps reporting high, the rooms are not connected: raising the
+        # gear does nothing, so stop following until the monitor falls back.
+        if pm_bohu < DOWN2:
+            self.remote_helpable = True
+            self.isolated_since = None
+        elif pm_dev < DOWN2 and pm_bohu >= UP4:
+            if self.isolated_since is None:
+                self.isolated_since = now
+            elif self.remote_helpable and now - self.isolated_since > GIVE_UP:
+                self.remote_helpable = False
+                log.warning("monitor %.0f high while purifier room is %.0f for %d min: "
+                            "rooms not connected, stop following the monitor",
+                            pm_bohu, pm_dev, GIVE_UP // 60)
+        else:
+            self.isolated_since = None
+
         # dual sensor: max() means either sensor alone can upshift,
-        # while a downshift requires both sensors to be low
-        eff = max(pm_bohu, pm_dev)
+        # while a downshift requires both sensors to be low -- unless we gave
+        # up on the remote room, then only the local sensor counts
+        eff = max(pm_dev, pm_bohu if self.remote_helpable else 0)
         target = cur
         if eff > UPMAX:
             target = 2
@@ -146,18 +168,19 @@ class Runner:
                 target = 1
             elif cur == 1 and eff < DOWN2:
                 target = 0
-            if target < cur and time.time() - self.level_since < MIN_HOLD:
+            if target < cur and now - self.level_since < MIN_HOLD:
                 target = cur
         if target != cur:
             names = ("gear2", "gear4", "gear6")
             src = "bohu" if pm_bohu >= pm_dev else "purifier"
-            log.info("pm25 bohu=%s purifier=%s (driven by %s): %s -> %s",
-                     pm_bohu, pm_dev, src, names[cur], names[target])
+            log.info("pm25 bohu=%s purifier=%s follow=%s (driven by %s): %s -> %s",
+                     pm_bohu, pm_dev, "yes" if self.remote_helpable else "no",
+                     src, names[cur], names[target])
             self.cli.set_mode(MODE_MANUAL)   # keep gear sticky; never touches power
             self.cli.set_speed((G2, G4, GMAX)[target])
             self.cli.query_state()
             self.level = target
-            self.level_since = time.time()
+            self.level_since = now
 
     def run(self):
         log.info("autopm start: >=%s->g4 >%s->g6 <%s->g4 <%s->g2 hold=%ss interval=%ss",
