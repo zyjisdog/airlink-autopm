@@ -34,7 +34,7 @@ UPMAX = T.get("up_max", 150)    # > 150  -> gear 6
 DOWN4 = T.get("down_4", 125)    # < 125  -> leave gear 6 for 4
 DOWN2 = T.get("down_2", 80)     # < 80   -> leave gear 4 for 2
 INTERVAL = CFG.get("interval_s", 60)
-MIN_HOLD = CFG.get("min_hold_s", 300)
+MIN_HOLD = CFG.get("min_hold_s", 900)  # purifier sensor drops as fan speed rises -> short holds flap
 G2, G4, GMAX = 1, 3, 5          # 0-based indices into GEARS -> values 2/4/6
 MODE_MANUAL = 2                 # MODES[] index
 
